@@ -1,7 +1,6 @@
 import argparse
 import os
 import shutil
-from tqdm import tqdm
 import pandas as pd
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain.schema import Document
@@ -23,16 +22,20 @@ def main():
         print("Clearing database…")
         clear_database()
 
-    documents = load_documents(DATA_PATH)
+    documents = load_csv_documents(DATA_PATH)
     chunks = split_documents(documents)
     add_to_chroma(chunks)
 
-def load_documents(filepath: str) -> list[Document]:
+def load_csv_documents(filepath: str) -> list[Document]:
     df = pd.read_csv(filepath)
     documents = []
     for idx, row in df.iterrows():
         content = f"Problem: {row['problem']}\nSolution: {row['solution']}"
-        metadata = {"level": row["level"], "type": row["type"], "id": str(idx)}
+        metadata = {
+            "type": row["type"],
+            "level": row["level"],
+            "orig_id": str(idx)
+        }
         documents.append(Document(page_content=content, metadata=metadata))
     return documents
 
@@ -48,42 +51,53 @@ def split_documents(documents: list[Document]) -> list[Document]:
 
 def add_to_chroma(chunks: list[Document]):
     db = Chroma(persist_directory=CHROMA_PATH, embedding_function=get_embedding_function())
-    chunks = calculate_chunk_ids(chunks)
-    
-    # Grab existing IDs from the DB to avoid duplicates.
-    existing_ids = set(db.get(include=[])["ids"])
-    print(f"Existing docs in DB: {len(existing_ids)}")
-    
-    new_chunks = [chunk for chunk in tqdm(chunks, desc="Processing chunks")
-                  if chunk.metadata["id"] not in existing_ids]
-    print(f"Adding {len(new_chunks)} new documents.")
-    
-    if new_chunks:
-        batch_size = 1000
-        for i in tqdm(range(0, len(new_chunks), batch_size), desc="Adding batches"):
-            batch = new_chunks[i : i + batch_size]
-            batch_ids = [chunk.metadata["id"] for chunk in batch]
-            db.add_documents(batch, ids=batch_ids)
-    else:
-        print("No new documents to add.")
 
-def calculate_chunk_ids(chunks: list[Document]) -> list[Document]:
+    chunks_with_ids = calculate_chunk_ids(chunks)
+
+    existing_items = db.get(include=[])  
+    existing_ids = set(existing_items["ids"])
+    print(f"Number of existing documents in DB: {len(existing_ids)}")
+
+    new_chunks = []
+    for chunk in chunks_with_ids:
+        if chunk.metadata["id"] not in existing_ids:
+            new_chunks.append(chunk)
+
+    if new_chunks:
+        print(f"👉 Adding new documents: {len(new_chunks)}")
+        batch_size = 1000  # Process in batches to avoid exceeding maximum batch sizes.
+        for i in range(0, len(new_chunks), batch_size):
+            batch_chunks = new_chunks[i:i+batch_size]
+            batch_ids = [chunk.metadata["id"] for chunk in batch_chunks]
+            db.add_documents(batch_chunks, ids=batch_ids)
+    else:
+        print("✅ No new documents to add")
+
+def calculate_chunk_ids(chunks):
     last_doc_id = None
-    chunk_index = 0
+    current_chunk_index = 0
+
     for chunk in chunks:
-        doc_id = chunk.metadata.get("id")
-        if doc_id == last_doc_id:
-            chunk_index += 1
+        doc_type = chunk.metadata.get("type", "Unknown")
+        level = chunk.metadata.get("level", "Unknown")
+        orig_id = chunk.metadata.get("orig_id", "0")
+        current_doc_id = f"{doc_type}:{level}:{orig_id}"
+        
+        # If it's the same document as the previous chunk, increment the chunk index.
+        if current_doc_id == last_doc_id:
+            current_chunk_index += 1
         else:
-            chunk_index = 0
-            last_doc_id = doc_id
-        chunk.metadata["id"] = f"{doc_id}:{chunk_index}"
+            current_chunk_index = 0
+        
+        new_chunk_id = f"{current_doc_id}:{current_chunk_index}"
+        last_doc_id = current_doc_id
+        chunk.metadata["id"] = new_chunk_id
+
     return chunks
 
 def clear_database():
     if os.path.exists(CHROMA_PATH):
         shutil.rmtree(CHROMA_PATH)
-        print("Database cleared.")
 
 if __name__ == "__main__":
     main()
