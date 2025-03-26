@@ -1,112 +1,89 @@
 import argparse
 import os
+import shutil
 from tqdm import tqdm
 import pandas as pd
-import shutil
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 from get_embedding_function import get_embedding_function
 from langchain_chroma import Chroma
 
 # Flow: Clears the DB directory -> loads the CSV file -> splits contents into chunks (if needed) -> adds chunks to Chroma if they’re new
-
 # Usage: python populate_database.py --reset to clear the database
 
 CHROMA_PATH = "chroma"
-DATA_PATH = "data/sampled_calculus.csv"  
+DATA_PATH = "data/algebra.csv"  # CSV with columns: problem, level, type, solution
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--reset", action="store_true", help="Reset the database.")
+    parser.add_argument("--reset", action="store_true", help="Clear the database before populating.")
     args = parser.parse_args()
+    
     if args.reset:
-        print("✨ Clearing Database")
+        print("Clearing database…")
         clear_database()
 
-    documents = load_documents()
+    documents = load_documents(DATA_PATH)
     chunks = split_documents(documents)
     add_to_chroma(chunks)
 
-def load_documents():
-    return load_csv_documents(DATA_PATH)
-
-def load_csv_documents(filepath: str) -> list[Document]:
+def load_documents(filepath: str) -> list[Document]:
     df = pd.read_csv(filepath)
     documents = []
     for idx, row in df.iterrows():
-        content = f"Question: {row['question']}\nAnswer: {row['answer']}"
-        # Metadata now uses 'section' and 'id' from the CSV.
-        metadata = {"section": row["section"], "id": row["id"]}
+        content = f"Problem: {row['problem']}\nSolution: {row['solution']}"
+        metadata = {"level": row["level"], "type": row["type"], "id": str(idx)}
         documents.append(Document(page_content=content, metadata=metadata))
     return documents
 
-def split_documents(documents: list[Document]):
-    text_splitter = RecursiveCharacterTextSplitter(
+def split_documents(documents: list[Document]) -> list[Document]:
+    splitter = RecursiveCharacterTextSplitter(
         chunk_size=800,
         chunk_overlap=80,
         length_function=len,
         is_separator_regex=False,
     )
-    return text_splitter.split_documents(documents)
+    return splitter.split_documents(documents)
+
 
 def add_to_chroma(chunks: list[Document]):
-    db = Chroma(
-        persist_directory=CHROMA_PATH, embedding_function=get_embedding_function()
-    )
-
-    # Calculate unique IDs for each chunk.
-    chunks_with_ids = calculate_chunk_ids(chunks)
-
-    # Retrieve existing document IDs.
-    existing_items = db.get(include=[]) 
-    existing_ids = set(existing_items["ids"])
-    print(f"Number of existing documents in DB: {len(existing_ids)}")
-
-    # Filter out documents that are already in the DB.
-    new_chunks = []
-    for chunk in tqdm(chunks_with_ids, desc="Processing chunks"):
-        if chunk.metadata["id"] not in existing_ids:
-            new_chunks.append(chunk)
-
-    print(f"👉 Adding new documents: {len(new_chunks)}")
-
+    db = Chroma(persist_directory=CHROMA_PATH, embedding_function=get_embedding_function())
+    chunks = calculate_chunk_ids(chunks)
+    
+    # Grab existing IDs from the DB to avoid duplicates.
+    existing_ids = set(db.get(include=[])["ids"])
+    print(f"Existing docs in DB: {len(existing_ids)}")
+    
+    new_chunks = [chunk for chunk in tqdm(chunks, desc="Processing chunks")
+                  if chunk.metadata["id"] not in existing_ids]
+    print(f"Adding {len(new_chunks)} new documents.")
+    
     if new_chunks:
-        batch_size = 1000  
+        batch_size = 1000
         for i in tqdm(range(0, len(new_chunks), batch_size), desc="Adding batches"):
-            batch_chunks = new_chunks[i : i + batch_size]
-            batch_ids = [chunk.metadata["id"] for chunk in batch_chunks]
-            db.add_documents(batch_chunks, ids=batch_ids)
+            batch = new_chunks[i : i + batch_size]
+            batch_ids = [chunk.metadata["id"] for chunk in batch]
+            db.add_documents(batch, ids=batch_ids)
     else:
-        print("✅ No new documents to add")
+        print("No new documents to add.")
 
-def calculate_chunk_ids(chunks):
-    """
-    Create unique IDs for each chunk using the CSV metadata.
-    This will create IDs like "curl:29629:0", "curl:29629:1", etc.
-    """
+def calculate_chunk_ids(chunks: list[Document]) -> list[Document]:
     last_doc_id = None
-    current_chunk_index = 0
-
+    chunk_index = 0
     for chunk in chunks:
-        section = chunk.metadata.get("section")
         doc_id = chunk.metadata.get("id")
-        current_doc_id = f"{section}:{doc_id}"
-
-        if current_doc_id == last_doc_id:
-            current_chunk_index += 1
+        if doc_id == last_doc_id:
+            chunk_index += 1
         else:
-            current_chunk_index = 0
-
-        new_chunk_id = f"{current_doc_id}:{current_chunk_index}"
-        last_doc_id = current_doc_id
-
-        chunk.metadata["id"] = new_chunk_id
-
+            chunk_index = 0
+            last_doc_id = doc_id
+        chunk.metadata["id"] = f"{doc_id}:{chunk_index}"
     return chunks
 
 def clear_database():
     if os.path.exists(CHROMA_PATH):
         shutil.rmtree(CHROMA_PATH)
+        print("Database cleared.")
 
 if __name__ == "__main__":
     main()
