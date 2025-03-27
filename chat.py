@@ -16,9 +16,9 @@ genai_client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
 # python3 query_data.py "How many vertical asymptotes does the graph of y=2/(x^2+x-6) have?"
 
-# python3 chat.py "Please solve this question using chain of thought prompting. Firstly you need to..." --image prob_1.png
+# python3 chat.py "Please solve this question using chain of thought prompting and the provided context retrieved from the database. Firstly you need to..." --image prob_1.png
 
-MODEL_NAME = "gemini-2.0-flash"
+MODEL_NAME = "gemini-2.0-flash-thinking-exp-01-21" # gemini-2.0-flash   gemini-2.5-pro-exp-03-25   gemini-2.0-flash-thinking-exp-01-21
 CHROMA_PATH = "chroma"
 
 PROMPT_TEMPLATE = """
@@ -104,18 +104,10 @@ def get_response(question: str, image_path: str=None):
             # print(chunk.text, end="", flush=True)
             response_text += chunk.text
 
-    # sources = [doc.metadata.get("id", "Unknown") for doc, _ in results]
-    # print(f"\nSources: {sources}")
+    sources = [doc.metadata.get("id", "Unknown") for doc, _ in results]
+    print(f"\nSources: {sources}")
 
     return response_text
-
-# def main():
-#     # Create CLI.
-#     parser = argparse.ArgumentParser()
-#     parser.add_argument("query_text", type=str, help="The query text.")
-#     args = parser.parse_args()
-#     query_text = args.query_text
-#     get_response(query_text)
 
 def main():
     parser = argparse.ArgumentParser()
