@@ -1,9 +1,9 @@
-from get_embedding_function import get_embedding_function
+from src.utils.get_embedding import get_embedding
 from langchain_chroma import Chroma
 
 CHROMA_PATH = "chroma"
 
-db = Chroma(persist_directory=CHROMA_PATH, embedding_function=get_embedding_function())
+db = Chroma(persist_directory=CHROMA_PATH, embedding_function=get_embedding)
 
 query = r"""
 How many vertical asymptotes does the graph of y=2/(x^2+x-6) have?

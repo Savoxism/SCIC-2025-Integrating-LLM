@@ -1,11 +1,13 @@
 import argparse
 import os
 import shutil
+
 import pandas as pd
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain.schema import Document
-from get_embedding_function import get_embedding_function
 from langchain_chroma import Chroma
+
+from ..utils.get_embedding import get_embedding
 
 # Flow: Clears the DB directory -> loads the CSV file -> splits contents into chunks (if needed) -> adds chunks to Chroma if they’re new
 # Usage: python populate_database.py --reset to clear the database
@@ -13,31 +15,7 @@ from langchain_chroma import Chroma
 CHROMA_PATH = "chroma"
 DATA_PATH = "data/algebra.csv"  # CSV with columns: problem, level, type, solution
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--reset", action="store_true", help="Clear the database before populating.")
-    args = parser.parse_args()
-    
-    if args.reset:
-        print("Clearing database…")
-        clear_database()
-
-    documents = load_csv_documents(DATA_PATH)
-    chunks = split_documents(documents)
-    add_to_chroma(chunks)
-
-def load_csv_documents(filepath: str) -> list[Document]:
-    df = pd.read_csv(filepath)
-    documents = []
-    for idx, row in df.iterrows():
-        content = f"Problem: {row['problem']}\nSolution: {row['solution']}"
-        metadata = {
-            "type": row["type"],
-            "level": row["level"],
-            "orig_id": str(idx)
-        }
-        documents.append(Document(page_content=content, metadata=metadata))
-    return documents
+ChromaDB = Chroma(persist_directory=CHROMA_PATH, embedding_function=get_embedding)
 
 def split_documents(documents: list[Document]) -> list[Document]:
     splitter = RecursiveCharacterTextSplitter(
@@ -48,13 +26,10 @@ def split_documents(documents: list[Document]) -> list[Document]:
     )
     return splitter.split_documents(documents)
 
-
 def add_to_chroma(chunks: list[Document]):
-    db = Chroma(persist_directory=CHROMA_PATH, embedding_function=get_embedding_function())
-
     chunks_with_ids = calculate_chunk_ids(chunks)
 
-    existing_items = db.get(include=[])  
+    existing_items = ChromaDB.get(include=[])  
     existing_ids = set(existing_items["ids"])
     print(f"Number of existing documents in DB: {len(existing_ids)}")
 
@@ -69,9 +44,13 @@ def add_to_chroma(chunks: list[Document]):
         for i in range(0, len(new_chunks), batch_size):
             batch_chunks = new_chunks[i:i+batch_size]
             batch_ids = [chunk.metadata["id"] for chunk in batch_chunks]
-            db.add_documents(batch_chunks, ids=batch_ids)
+            ChromaDB.add_documents(batch_chunks, ids=batch_ids)
     else:
         print("✅ No new documents to add")
+
+def retrieve_docs(query_text: str, limit: int = 5):
+    results = ChromaDB.similarity_search_with_score(query_text, k=limit)
+    return results
 
 def calculate_chunk_ids(chunks):
     last_doc_id = None
@@ -98,6 +77,32 @@ def calculate_chunk_ids(chunks):
 def clear_database():
     if os.path.exists(CHROMA_PATH):
         shutil.rmtree(CHROMA_PATH)
+
+def load_csv_documents(filepath: str) -> list[Document]:
+    df = pd.read_csv(filepath)
+    documents = []
+    for idx, row in df.iterrows():
+        content = f"Problem: {row['problem']}\nSolution: {row['solution']}"
+        metadata = {
+            "type": row["type"],
+            "level": row["level"],
+            "orig_id": str(idx)
+        }
+        documents.append(Document(page_content=content, metadata=metadata))
+    return documents
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--reset", action="store_true", help="Clear the database before populating.")
+    args = parser.parse_args()
+    
+    if args.reset:
+        print("Clearing database…")
+        clear_database()
+
+    documents = load_csv_documents(DATA_PATH)
+    chunks = split_documents(documents)
+    add_to_chroma(chunks)
 
 if __name__ == "__main__":
     main()
