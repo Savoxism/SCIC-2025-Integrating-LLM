@@ -4,19 +4,19 @@ import os
 
 from langchain_chroma import Chroma
 from langchain.prompts import ChatPromptTemplate
+from langchain_openai import OpenAIEmbeddings
 from google import genai
 from google.genai import types
 
-from utils.get_embedding import get_embedding
-from database.database import retrieve_docs
-
+from database import retrieve_docs
 from dotenv import load_dotenv
-
 load_dotenv()
 
 genai_client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
 # python3 query_data.py "How many vertical asymptotes does the graph of y=2/(x^2+x-6) have?"
+
+# python3 chat.py "Please solve this question using chain of thought prompting. Firstly you need to..." --image prob_1.png
 
 MODEL_NAME = "gemini-2.0-flash"
 CHROMA_PATH = "chroma"
@@ -35,7 +35,12 @@ Question:
 Chain of Thought: Firstly I need to ...
 """
 
-ChromaDB = Chroma(persist_directory=CHROMA_PATH, embedding_function=get_embedding)
+embedding = OpenAIEmbeddings(
+        model="text-embedding-3-small",  # or "text-embedding-ada-002"
+        openai_api_key=os.getenv("OPENAI_API_KEY")
+)
+
+ChromaDB = Chroma(persist_directory=CHROMA_PATH, embedding_function=embedding)
 
 def get_response(question: str, image_path: str=None):
     """
@@ -57,7 +62,7 @@ def get_response(question: str, image_path: str=None):
         str: Câu trả lời được tạo bởi mô hình AI dựa trên context và truy vấn đầu vào."
     """
     
-    results = retrieve_docs(question, k=5)
+    results = retrieve_docs(question, limit=5)
 
     context_text = "\n\n---\n\n".join([doc.page_content for doc, _ in results])
     prompt_template = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
@@ -104,13 +109,22 @@ def get_response(question: str, image_path: str=None):
 
     return response_text
 
+# def main():
+#     # Create CLI.
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument("query_text", type=str, help="The query text.")
+#     args = parser.parse_args()
+#     query_text = args.query_text
+#     get_response(query_text)
+
 def main():
-    # Create CLI.
     parser = argparse.ArgumentParser()
     parser.add_argument("query_text", type=str, help="The query text.")
+    parser.add_argument("--image", type=str, help="Optional image path.", default=None)
     args = parser.parse_args()
-    query_text = args.query_text
-    get_response(query_text)
+
+    response = get_response(args.query_text, image_path=args.image)
+    print(response)
 
 if __name__ == "__main__":
     main()

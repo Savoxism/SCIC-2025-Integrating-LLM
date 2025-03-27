@@ -1,21 +1,26 @@
 import argparse
 import os
 import shutil
-
 import pandas as pd
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 from langchain_chroma import Chroma
+from langchain_openai import OpenAIEmbeddings
 
-from ..utils.get_embedding import get_embedding
+from dotenv import load_dotenv
+load_dotenv()
 
 # Flow: Clears the DB directory -> loads the CSV file -> splits contents into chunks (if needed) -> adds chunks to Chroma if they’re new
-# Usage: python populate_database.py --reset to clear the database
 
 CHROMA_PATH = "chroma"
 DATA_PATH = "data/algebra.csv"  # CSV with columns: problem, level, type, solution
 
-ChromaDB = Chroma(persist_directory=CHROMA_PATH, embedding_function=get_embedding)
+embedding = OpenAIEmbeddings(
+        model="text-embedding-3-small",  # or "text-embedding-ada-002"
+        openai_api_key=os.getenv("OPENAI_API_KEY")
+)
+
+ChromaDB = Chroma(persist_directory=CHROMA_PATH, embedding_function=embedding)
 
 def split_documents(documents: list[Document]) -> list[Document]:
     splitter = RecursiveCharacterTextSplitter(

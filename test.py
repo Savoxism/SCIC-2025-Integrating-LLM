@@ -1,4 +1,4 @@
-from src.utils.get_embedding import get_embedding
+from get_embedding import get_embedding
 from langchain_chroma import Chroma
 
 CHROMA_PATH = "chroma"
